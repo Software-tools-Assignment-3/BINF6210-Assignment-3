@@ -65,7 +65,7 @@ plot(staph16Ssing)
 
 #Convert clusters to dendrogram, complete linkage
 staph16Scomp <- staph_complete %>%
-  as.dendrogram %>% #converting cluster to a dendrogram
+  as.dendrogram %>% 
   set("branches_k_color", k=10)
 plot(staph16Scomp)
 
