@@ -1,239 +1,203 @@
-#This R script has been edited by Pasha Talebi Charmchi
+#This script has been edited by Pasha Talebi Charmchi
 
-# Load Packages
-library(tidyverse)
-library(muscle)
-library(Biostrings)
-library(DECIPHER)
-library(phytools)
-library(ape)
-library(phangorn)
-library(dendextend)
+#PART C - Adapting Concepts and Skills to Create New Research 
 
-#Order of Equisetales , files acquired Oct 30, 2019 at 3:00 PM.
-Equisetales <- read_tsv("http://www.boldsystems.org/index.php/API_Public/combined?taxon=Equisetales&format=tsv")
+#Project topic and objectives:
 
-#Writing data set into a file
-write_tsv(Equisetales, "Equisetales.tsv")
+#In this mini-project, I wanted to determine how much of impact different countries has contributed to the efforts of classifying all the members of the Sipuncula taxa. For this, I need to know which countries have submitted barcodes and how many have they submitted at the current time. To get the bigger picture, I hope to determine the current status of the classification globally and then follow up with how each country have contributed to the effort. In this respect, I want to determine the genetic diversity of species found in different geographic locations. Ultimately, I hope to determine which country had the highest impact based on the genetic diversity of the barcodes recorded and submitted from said country.
 
-Equisetales <- read_tsv("Equisetales.tsv")
 
 ################################################################################################################
 
-##Data attributes and cleaning data
+#Package initiations
+library(tidyverse)
+library(vegan)
+library(Biostrings)
+
+################################################################################################################
+
+#Taxon of Sipuncula, files acquired Oct 2, 2019 at 11:30 AM.
+Sipuncula <- read_tsv("http://www.boldsystems.org/index.php/API_Public/combined?taxon=Sipuncula&format=tsv")
+
+write_tsv(Sipuncula, "Sipuncula.tsv")
+
+################################################################################################################
 
 #Checking basic attributes of Sipincula data set
-class(Equisetales)
-summary(Equisetales)
-names(Equisetales)
+class(Sipuncula)
+summary(Sipuncula)
+names(Sipuncula)
 
-#extracting specific columns useful for phylogenetic studies
-Equisetales_filtered <- Equisetales %>%
-  select(processid, bin_uri, genus_name, species_name, country, lat, lon, markercode, nucleotides)
+################################################################################################################
 
-#Checking how many unique species in data set
-length(unique(Equisetales_filtered$species_name))
+#Checking for geographic distributions
 
-#Checking how many unique genus in data set
-length(unique(Equisetales_filtered$genus_name))
+#Checking missing latitudal records
+sum(is.na(Sipuncula$lat))
+hist(Sipuncula$lat, xlab = 'Latitude', ylab = 'Records', main = 'Fig 1: Distribution of Records by Latitude')
+#My peer used above function to check geographic distributions which is actually a built-in function for data visualization
+#My alternative way to plot a histogram would be to use ggplot as the output would be more beautiful than using his() function. Despite its complexity we can easily add more features to our plot by adding more layers.
+ggplot(data = Sipuncula, aes(x = Sipuncula$lat)) + geom_histogram(color = 'darkgray', fill = 'white', binwidth = 60) + labs(x = 'Latitude', y = 'Records', title = 'Distribution of Records by Latitude')
 
-#Quick check for records with no entries for country of origin
-sum(is.na(Equisetales_filtered$country)) 
-#Quick check for records with no entries for latitude
-sum(is.na(Equisetales_filtered$lat))
-#Quick check for records with no entries for longitude
-sum(is.na(Equisetales_filtered$lon))
+################################################################################################################
 
-#Checking for how many countries have records of species
-length(unique(Equisetales_filtered$country))
+#Checking basic parameters
+mean(Sipuncula$lat, na.rm = TRUE)
+min(Sipuncula$lat, na.rm = TRUE)
+max(Sipuncula$lat, na.rm = TRUE)
+#My peer used above functions to check basic attributes 
+#My alternative way would be to use summary() function as it is more efficient and we can achieve the same results by just writing one line of code.
+summary(Sipuncula$lat)
 
-#Counts the number of records within each country and returns the counts in a descending order
-Equ_per_country <- Equisetales_filtered %>%
+################################################################################################################
+
+#Checking how many records are there for each country
+
+sum(is.na(Sipuncula$country)) # Quick check for records with no entries for country of origin
+
+Sipuncula.per.country.count <- Sipuncula %>%
+  #Groups the records by country
   group_by(country) %>%
+  #Counts the number of records within each country and returns the counts in a descending order
   summarize(no.records = length(processid)) %>%
   arrange(desc(no.records)) %>%
   print()
 
-#Removing records with missing data for species name, genus name, markercode, country, latitude, longitude and missing nucleotides
-Clean_Equ <- Equisetales_filtered %>%
-  filter(!is.na(species_name)) %>%
-  filter(!is.na(genus_name)) %>%
+################################################################################################################
+
+#Filtering data set
+
+#Determing which genetic markers was used most frequently
+Sipuncula.markercode <- Sipuncula %>%
+  #All records with no nucleotide data will be filtered out.
+  filter(!is.na(nucleotides)) %>%
+  #Group data by their genetic markers.
+  group_by(markercode) %>%
+  #Summarizes data for each genetic marker and length() counts how many records are there per genetic marker.
+  summarize(n = length(processid)) %>%
+  #Return the counts for each genetic marker in descending order.
+  arrange(desc(n)) %>%
+  print()
+###############################################################################################################
+
+#It would be wise to use piping but an alternative way would be to use table() function. By using table() function we can achieve the same result with just one line of code.
+table(Spiuncula$markercode)
+
+###############################################################################################################
+
+#Creating a data subset consisting only of records with nucleotide sequences from the genetic marker COI-5P. Only this genetic marker has relevant number of records. 
+Sipuncula.COI_5P <- Sipuncula %>%
+  #Removes all records without nucleotide data
+  filter(!is.na(nucleotides)) %>%
+  #Takes all records that corresponds to COI-5P genetic marker
+  filter(markercode == "COI-5P") %>%
+  #Takes all records that contains the four DNA bases
+  filter(str_detect(nucleotides, "[ACGT]"))
+
+################################################################################################################
+
+#Creating a species accumulation curves for Sipuncula records with nucleotide sequences from the genetic marker COI-5P. 
+
+#Global accumulation curve: this curve will demonstrate whether classification of all species of the Taxon Sipuncula is near completion.
+
+#Groups all records by BINs and put them all in one global site and counts how many records exist for each BIN.
+Sipuncula.COI_5P.global <- Sipuncula.COI_5P %>%
+  group_by(bin_uri) %>%
+  count(bin_uri)
+
+#Converts commAssign1 into a community object. The BINs will become column headers and the record counts for each bin will be the row values (the row just being the one global site).
+Sipuncula.COI_5P.commglobal <- spread(Sipuncula.COI_5P.global, bin_uri, n)
+
+#Will create an accumulation curve (using function rarecurve()) that treats all BINs as a function of one site, global. 
+Sipuncula.globalmodel <- rarecurve(Sipuncula.COI_5P.commglobal, xlab = 'No. of Records', ylab = 'No. of Species (BINs)', main ='Fig 2: Sipuncula Species Accumulation Curve in a Single Global Site')
+
+#Species accumulation curve using BINs as functions of their countries of discovery. This curve may demonstrate patterns in rate of discovery as more countries (or sites) get added in. Can answer whether each country adds alot of unique species or there is a tendency of different countries having the same species. 
+
+#Formatting data to create a data frame that returns the number of samples per BIN in each country.
+
+#Will group data by BINs by country to allow the count for the number of specimens that have each BINs per country
+Sipuncula.COI_5P.country <- Sipuncula.COI_5P %>%
+  group_by(country, bin_uri) %>% 
+  count(bin_uri)
+
+#Remove all records that doesn't have entries for their country of origin and BINs. The goal is to see the effects of addition of countries to the number of unique BINs. A missing record of either makes the data irrelevant.
+Sipuncula.COI_5P.country.rm <- Sipuncula.COI_5P.country %>%
   filter(!is.na(country)) %>%
-  filter(!is.na(lat)) %>%
-  filter(!is.na(lon)) %>%
-  filter(!is.na(markercode)) %>%
-  filter(!is.na(nucleotides)) 
+  filter(!is.na(bin_uri))
 
-#Attribute check for cleaned up dataframe
-dim(Clean_Equ)
-names(Clean_Equ)
-unique(Clean_Equ$species_name)
-sum(is.na(Clean_Equ$nucleotides))
+#Converting data frame containing the sample counts per BINs per country into a community object using spread()
+Sipuncula.COI_5P.comm.country <- spread(Sipuncula.COI_5P.country.rm, bin_uri, n)
 
+#Converts NAs to zeroes, to tell R that barcoding a particular BIN have yet to be done in that country.Required for defining the ylim of the plot.
+Sipuncula.COI_5P.comm.country[is.na(Sipuncula.COI_5P.comm.country)] <- 0
 
-################################################################################################################
+#Sets country as a row rather than a data column (to use as the X-axis in a species accumulation curve).
+Sipuncula.COI_5P.comm.country <- Sipuncula.COI_5P.comm.country %>%
+  remove_rownames %>%
+  column_to_rownames(var="country")
 
-#Checking and filtering nucleotide data
+#Creates a species accumulation curve with numbers of species as the function of the number of countries.
+Sipuncula.COI_5P.countrymodel <- specaccum(Sipuncula.COI_5P.comm.country)
 
-#Checking basic attributes
-min(str_length(Clean_Equ$nucleotides))
-mean(str_length(Clean_Equ$nucleotides))
-median(str_length(Clean_Equ$nucleotides))
-max(str_length(Clean_Equ$nucleotides))
-#My peer used above functions to check basic attributes for nucleotide sequences he retrieved from data base
-#My alternative way to check basic attributes for nucleotides data would be to use both nchar() and summary() function as it is more efficient and we can achieve the same results by just writing one line of code.
-summary(nchar(Clean_Equ$nucleotides))
+#Plots the model curve
+plot(Sipuncula.COI_5P.countrymodel, xlab = 'No. of Sites (Countries)', ylab = 'No. of Species (BINs)', main ='Fig 3: Sipuncula Species Accumulation Curve from Multiple Sites ')
 
+#Dataframe attributes check
+summary(Sipuncula.COI_5P.comm.country)
+names(Sipuncula.COI_5P.comm.country)
+str(Sipuncula.COI_5P.comm.country)
 
-#Checking distribution of sequence lengths
-hist(str_length(Clean_Equ$nucleotides))
-#My peer used above function to check the distribution of sequence length which is actually a basic function for data visualization
-#My alternative way to plot a histogram would be to use ggplot2 as the output would be more beautiful than a basic built-in function. Despite its complexity we can easily add features to our plot by adding more layers.
-ggplot(data = Clean_Equ, aes(x = nchar(Clean_Equ$nucleotides))) + geom_histogram(binwidth = 60) + labs(x = 'Sequences', y = 'Number Of Nucleotides', title = 'Distribution Of Sequence Lengths')
+###################################################################################################################################
 
-#Histogram displays stragglers in terms of sequence length; removing sequences < 550 bp and sequences > 600
-#Removing sequences of these lengths will help in removing outliers
+#Creating cluster to determine dissimilarity between the species from each country.
 
-#Removing sequences greater than 600 bp
-Equ_trimmed <- Clean_Equ %>%
-  filter(!(str_length(Clean_Equ$nucleotides) > 600)) 
+#Calculates relative distances among samples using Bray-Curtis method
+Sipuncula.bray <- vegdist(Sipuncula.COI_5P.comm.country, method = "bray", rm = TRUE)
 
-#Removing sequences less than 550 bp 
-Equ_trimmed <- Equ_trimmed %>%
-  filter(!(str_length(Equ_trimmed$nucleotides) < 550)) 
+#Uses average-linkage algorithm to cluster communities
+Sipuncula.brayclust <- hclust(Sipuncula.bray, method = "average")
 
-#Removing an outlier found from clustering, and MSA was re-ran
-Equ_trimmed <- Equ_trimmed[-12,]
-
-#Checking number of unique species
-length(unique(Equ_trimmed$species_name))
-
-#Checking basic attributes
-min(str_length(Equ_trimmed$nucleotides))
-mean(str_length(Equ_trimmed$nucleotides))
-median(str_length(Equ_trimmed$nucleotides))
-max(str_length(Equ_trimmed$nucleotides))
-hist(str_length(Equ_trimmed$nucleotides))
-
-################################################################################################################
-
-#Reconstructing Phylogeny
-
-#Reformatting sequences for downstream analysis with muscle package
-Equ_trimmed$nucleotides <- DNAStringSet(Equ_trimmed$nucleotides)
-
-#Setting processid as identifiers for each sequence
-names(Equ_trimmed$nucleotides) <- Equ_trimmed$species_name
-
-#Check if reformatting was done correctly
-class(Equ_trimmed$nucleotides)
-
-#------------------------Multiple Sequence Alignment (MSA)---------------------------------
-
-#Using muscle for MSA with default parameters
-Equ.alignment <- DNAStringSet(muscle::muscle(Equ_trimmed$nucleotides), use.names = TRUE)
-
-#Checking Alignment
-BrowseSeqs(Equ.alignment)
-
-#calculating mean, max, min and observing distribution of gaps through a histogram
-min(unlist(lapply(Equ.alignment, str_count, "-")))
-max(unlist(lapply(Equ.alignment, str_count, "-")))
-mean(unlist(lapply(Equ.alignment, str_count, "-")))
-hist(unlist(lapply(Equ.alignment, str_count, "-")))
-
-#Converting data type into DNAbin for more downstream analysis
-dnaBin.Equ <- as.DNAbin(Equ.alignment)
-
-#Creating a distance matrix using the "K80" model
-DM.Equ <- dist.dna(dnaBin.Equ, model = "K80", as.matrix = TRUE, pairwise.deletion = TRUE)
-#My peer used below functions to compute a distance matrix needed for clustering sequences
-#My alternative way to create a distance matrix would be to use kdistance() function
-library(kmer)
-kdis <- kdistance(x = as.DNAbin(Equ.alignment), k = 3)
+#returns a community cluster diagram
+plot(Sipuncula.brayclust, ylab = "Bray-Curtis Dissimilarity", main = '', xlab = "Fig 4: Genomic dissimilarities between species from different countries")
 
 
-#Clustering using the UPGMA method with a 2% divergence threshold 
-clusters.Equ <- IdClusters(DM.Equ,
-                           method = "UPGMA",
-                           cutoff= 0.02,      #2% sequence difference as species boundary
-                           showPlot = TRUE,
-                           type = "clusters", #returns a clusters output
-                           verbose = TRUE)
-#My alternative way to cluster our sequences would be as follow
-hclust(kdis, "average")
+##############################################################################################################
 
-#Reconstructing phylogenetic relationship using Neighbourhood-joining method from ape package
-Equ_NJ <- nj(DM.Equ) #NJ from ape package 
+#Determining diversity of species within countries with the most number of records.
 
-#creating a phylogentic tree with Neibough Joining data
-plotTree(Equ_NJ, fsize = 0.6, pts = TRUE)
+#Creates a subset that contains counts of specimens per BINs per country
+Sipuncula.COI_5P.Top.5 <- Sipuncula %>%
+  filter(country == "Russia" | country == "China"| country == "United States"| country == "Canada"| country == "Thailand") %>% #extracts records for top 5 countries with highest number of records
+  group_by(country, bin_uri) %>% #groups by BINs per country
+  count(bin_uri)
+
+#Removes all missing values in variables country and bin_uri
+Sipuncula.COI_5P.Top.5.rm <- Sipuncula.COI_5P.Top.5 %>%
+  filter(!is.na(country)) %>%
+  filter(!is.na(bin_uri))
+
+#Transforms data frame into a community object
+Sipuncula.COI_5P.comm.Top.5 <- spread(Sipuncula.COI_5P.Top.5.rm, bin_uri, n)
+
+#Converts NAs to zeroes for downstream processing
+Sipuncula.COI_5P.comm.Top.5[is.na(Sipuncula.COI_5P.comm.Top.5)] <- 0
+
+#Sets country as a row rather than a data column 
+Sipuncula.COI_5P.comm.Top.5 <- Sipuncula.COI_5P.comm.Top.5 %>%
+  remove_rownames %>%
+  column_to_rownames(var="country")
+
+#returns the Simpson's Reciprocal Index for each country. Will show which country has the highest diversity
+diversity(Sipuncula.COI_5P.comm.Top.5, index = "invsimpson")
+
+
+#returns the number of species 
+specnumber(Sipuncula.COI_5P.comm.Top.5)
 
 ##########################################################################################################
 
-#I will be taking one sample per species to create a better (simpler) visualization of relationships within the organisms within Equisetales.
+#There were 21 different countries that have submitted records, however most of the BINs did not have entries for their countries of origins. The sampling of Sipuncula members globally is largely incomplete (Fig 2.) and it is apparent that there are still several unknown species within each country listed in this study and those which are not (Fig 3.). The species found in North America, Japan and French Polynesia have been observed to be more genetically different relative to the rest of the species found in other locations (Fig 4.). Most of the records come from Russia, however these records belonged only to 3 unique species, suggesting a low genetic diversity. The country that have the highest genetic diversity is the United States (17 unique species), which agrees with the finding of species from North America being more genetically different. In conclusion, sampling of Sipuncula is largely incomplete, and many species are yet to be sampled within most countries. 
 
+##########################################################################################################
 
-#Combining original filtered search results with their cluster affiliations
-Equ_OG_clusters <- cbind(Equ_trimmed, clusters.Equ[[1]])
-
-#Converting data type of cluster from integer into factor
-Equ_OG_clusters$cluster <- as.factor(Equ_OG_clusters$cluster)
-
-#Data check to see if conversion properly applied
-class(Equ_OG_clusters$cluster)
-
-#Noticed that two of the same species were being included when I wanted to take only one record per species (for next step).This command changes the name to match the "Genus species" format.
-Equ_OG_clusters$species_name <- str_replace(Equ_OG_clusters$species_name, "subsp\\.* affine", "")
-
-
-#Random selection of one representative sequence per cluster
-Equ_SeqPer_Species <- Equ_OG_clusters %>%
-  group_by(species_name) %>%
-  sample_n(1)
-
-
-#checking the number of unique species
-length(unique(Equ_SeqPer_Species$species_name))
-
-#checking the number of clusters
-length(unique(Equ_SeqPer_Species$cluster))
-
-#converting sequences into a DNAStringSet data type
-Equ_SeqPer_Species$nucleotides <- DNAStringSet(Equ_SeqPer_Species$nucleotides)
-
-#Setting species name as identifiers for each sequence
-names(Equ_SeqPer_Species$nucleotides) <- Equ_SeqPer_Species$species_name
-
-
-#Performing multiple sequence alignment of each representative sequence from each species
-Equ.per.species.alignment <- DNAStringSet(muscle::muscle(Equ_SeqPer_Species$nucleotides), use.names = TRUE)
-
-
-#converting alignment data into a DNAbin
-Per.species.DNAbin <- as.DNAbin(Equ.per.species.alignment)
-
-#Creating a distance matrix using the K80 model
-DM.per.species <- dist.dna(Per.species.DNAbin, model = "K80", as.matrix = TRUE, pairwise.deletion = TRUE)
-
-
-#I wanted to compare the phylogentic trees from single and and average-linkage clustering. I chose to compare these two particular clustering algorithms because average-linkage aims to strike a balance between single and complete-linkage clustering. Doing a mirror comparison will allow me to determine how different or similar they are in producing a phylogenetic tree for the same data set. 
-
-
-#Creating a single-linkage clustering based tree using the upgma function from the phangorn package
-SUPGMAEq <- upgma(DM.per.species, method = "single")
-plotTree(SUPGMAEq)
-#Labelling the tips with the clusters where each species belong to
-tiplabels(Equ_SeqPer_Species$`clusters.Equ[[1]]`,adj=c(0.9,0.5))
-
-#Creating an average-linkage based tree using the upgma function from the phangorn package
-CUPGMAEq <- upgma(DM.per.species, method = "average")
-plotTree(CUPGMAEq)
-#Labelling the tips with the clusters where each species belong to
-tiplabels(Equ_SeqPer_Species$`clusters.Equ[[1]]`,adj=c(0.9,0.5))
-
-
-#Comparing the dendograms based on single-linkage and average-linkage clustering.
-tanglegram(SUPGMAEq,CUPGMAEq, main_left="Single", main_right = "Average",common_subtrees_color_branches = TRUE, columns_width = c(4, 3, 4),margin_inner = 10)
-
-#As a whole, the script is well commented. However, providing some information about the puporse of the project and the reasons for using the function used in this project would improve the script
+#As a whole, the script is well commented and organized. However, providing some information about the reasons for using the function used in this project would improve the script and it would be better if the comments were put in front of each code rather than in a new line. 
